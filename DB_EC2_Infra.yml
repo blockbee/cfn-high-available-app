@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+    This template/stack will deploy EC2 Instances and mysqlDB over the existing VPC infrastructure
+
+Parameters: 
+  EnvironmentName: 
+    Description: Name of the Environment to prefix as resource name
+    Type: String
+  EnvironmentSize: 
+    Description: Select environment Size (S, M, L)
+    Type: String
+    Default: SMALL
+    AllowedValues: [SMALL, MEDIUM, LARGE]
+  DBName: 
+    Description: Name of the database
+    Type: String
+    Default: portfolio
+  MasterUsername: 
+    Description: Username of Database
+    Type: String
+    Default: portfolio
+  MasterUserPassword: 
+    Description: Password for the Database
+    Type: String
+    Default: pa55w0rd
+    NoEcho: true
+
+Mappings: 
+  RegionMap: #Map(1) Logical name
+    us-east-1: #Key (N. Verginia)
+      "Amazon": "ami-0fc61db8544a617ed"
+      "RedHat": "ami-0c322300a1dd5dc79"
+      "Ubuntu": "ami-07ebfd5b3428b6f4d" 
+    us-east-2: #Ohio
+      RedHat: ami-0520e698dd500b1d1 
+      Ubuntu: ami-0fc20dd1da406780b 
+      Amazon: ami-0e01ce4ee18447327
+    ap-south-1: #Mumbai
+      RedHat: ami-0a74bfeb190bd404f 
+      Ubuntu: ami-0620d12a9cf777c87 
+      Amazon: ami-03b5297d565ef30a6
+  InstanceSize: #Map(2) Logical name
+    SMALL: #Key
+      EC2: t2.micro #NAme: Value
+      DB: db.t2.micro
+    MEDIUM: 
+      EC2: t2.small
+      DB: db.t2.small
+    LARGE: 
+      EC2: t2.medium
+      DB: db.t2.medium
+  
+Resources: 
+  WebAppDB: #Database
+    Type: AWS::RDS::DBInstance
+    Properties: 
+      DBName: !Ref DBName
+      Engine: MySQL
+      DBInstanceClass: !FindInMap [InstanceSize, !Ref EnvironmentSize, DB]
+      AllocatedStorage: 10
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      DBSubnetGroupName: !Ref DBSubnetGroups
+      DBSecurityGroups: !Ref DBSecurityGroups
+  DBSecurityGroups: 
+    Type: AWS::RDS::DBSecurityGroup
+    Properties: 
+      GroupDescription: "MySQL Securiry Group EC2 VPC Security Group" #Ingress for Amazon EC2 security group
+      EC2VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-WebAppVPCId
+      DBSecurityGroupIngress: !Ref DBSecurityGroupbyEC2
+  DBSecurityGroupbyEC2: 
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: MySQL port 3306
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-WebAppVPCId
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress: 
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0   
+  DBSubnetGroups: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: Mysql Subnet Groups
+      DBSubnetGroupName: WebAppDB-MySQL
+      SubnetIds: 
+        - Fn::ImportValue: !Sub ${EnvironmentName}-Private-Subnets
+
+  LoadBalancerSecurityGroup: #Security Groups
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allows http to our load balancer #Does this allows https too?
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-WebAppVPCId"
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: !Sub LB Sec Group for ${EnvironmentName}
+  WebServerSecurityGroup: 
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow HTTP and SSH
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-WebAppVPCId"
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress: 
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: !Sub WebServer Sec Group for ${EnvironmentName}
+  
+  WebAppLaunchConfig: #Is it works same as AWS::EC2::Instance initial ec2 launch
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties: 
+      UserData: 
+        Fn::Base64: !Sub |
+          #!bin/bash
+          apt-get update -y
+          apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+          #Install Docker
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+          add-apt-repository \
+          "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+          $(lsb_release -cs) \
+          stable"
+          apt-get update
+          apt-get install -y docker-ce
+          usermod -aG docker ubuntu
+          docker run -p 8080:8080 tomcat:8.0
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ubuntu]
+      InstanceType: !FindInMap [InstanceSize, !Ref EnvironmentSize, EC2 ]
+      SecurityGroups: !Ref WebServerSecurityGroup
+      BlockDeviceMappings: 
+        - DeviceName: "/dev/sdk"
+          Ebs: 
+            VolumeSize: 10
+  WebAppAutoScalingGroup: 
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties: 
+      AutoScalingGroupName: WebApp Auto Scaling Group
+      VPCZoneIdentifier: #A list of subnet IDs for a virtual private cloud (VPC)
+        - Fn::ImportValue: !Sub "${EnvironmentName}-Private-Subnets" #Returns a list of subnets
+      LaunchConfigurationName: !Ref WebAppLaunchConfig
+      MinSize: 3
+      MaxSize: 5
+      TargetGroupARNs: !Ref WebAppTargetGroup
+  WebAppLoadBalancer: 
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Subnets: 
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PUB-SUB-1
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PUB-SUB-2
+      SecurityGroups: !Ref LoadBalancerSecurityGroup
+  LBListener: 
+    Type: AWS::ElasticLoadBalancingV2::Listener #Specifies a listener for an Application Load Balancer
+    Properties: 
+      DefaultActions: 
+        - Type: Forward #fixed-response | forward | redirect | and more
+          TargetGroupArn: !Ref WebAppTargetGroup
+      LoadBalancerArn: !Ref WebAppLoadBalancer
+      Port: 80
+      Protocal: HTTP
+  LBListenerRule: 
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties: 
+      DefaultActions: 
+        - Type: Forward
+          TargetGroupArn: !Ref WebAppTargetGroup
+      Conditions: 
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref LBListener
+      Priority: 1
+  WebAppTargetGroup: 
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-WebAppVPCId
+    
+
+          
+      

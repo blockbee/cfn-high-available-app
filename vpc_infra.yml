@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: > #About the template
+  This temple is to deploy the necessary networking infrastructure on with 2 public and 2 private subnets
+  VPC CIDR: 10.0.0.0/16
+  subnet CIDR: 10.0.0.0/24 (for each public and private subnet)
+
+Parameters: #Values to pass at runtime
+  EnvironmentName: 
+    Description: Name the environment to prefix as the resource name
+    Type: String
+  VpcCIDR: 
+    Description: IP range for this VPC
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnet1CIDR:
+    Description: IP range for public subnet 1
+    Type: String
+    Default: 10.0.0.0/24
+  PublicSubnet2CIDR: 
+    Description: IP range for public subnet 2
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnet1CIDR:
+    Description: IP range for private subnet 1
+    Type: String
+    Default: 10.0.2.0/24
+  PrivateSubnet2CIDR:
+    Description: IP range for private subnet 2
+    Type: String
+    Default: 10.0.3.0/24
+
+Resources:
+  WebAppVPC: #Creatting VPC
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true #Indicates whether instances with public IP addresses get corresponding public DNS hostnames
+      Tags: 
+        - Key: Name
+          Value: !Ref EnvironmentName
+  InternetGateway: #Creating IG
+    Type: AWS::EC2::InternetGateway
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: !Ref EnvironmentName
+  InternetGatewayAttachment: #IG Attached to VPC
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref WebAppVPC
+  
+  PublicSubnet1:  #Creating Subnets
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WebAppVPC
+      AvailabilityZone: !Select [0, !GetAZs ''] #inline list/array
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true #Indicates whether instances launched in this subnet receive a public IPv4 address.
+      Tags: 
+        - Key: Name
+          Value: !Join [" ", [Pub1, !Ref EnvironmentName]]
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: Name
+          Value: !Sub Pub2 ${EnvironmentName} # same as !Join [" " [Pub2, !Ref EnvironmentName]]
+  PrivateSubnet1: #Creating Private Subnet
+    Type: AWS::EC2::Subnet
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Name
+          Value: !Join [" ", [priv1, !Ref EnvironmentName]]
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Name
+          Value: !Join [" ", [priv2, !Ref EnvironmentName]]
+  
+  NatGatewayEIP1: #Getting EIP before attached to NAT Gateway
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment #required if associated domain is vpc
+    Properties:
+      Domain: vpc #Alowed values standers | vpc
+      Tags: 
+        - Key: Name
+          Value: !Sub EIP1 for NatGateway1 in ${EnvironmentName}
+  NatGatewayEIP2: 
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties: 
+      Domain: vpc
+      Tags: 
+        - Key: Name
+          Value: !Sub EIP2 for NatGateway2 in ${EnvironmentName}
+  NatGateway1:  #Creating NAT Gateway
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP1.AllocationId
+      SubnetId: !Ref PublicSubnet1
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt NatGatewayEIP2.AllocationId
+      SubnetId: !Ref PublicSubnet2
+  
+  PublicRouteTable: #Creating Public Route Table
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      Tags: 
+        - Key: Name
+          Value: !Sub Public Route for ${EnvironmentName}
+  DefaultPublicRoute:  #Creating Public Route to send traffic to Internet Gateway
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1RouteTableAssociation: 
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+  PublicSubnet2RouteTableAssociation: 
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+  
+  PrivateRouteTable1: #Creating Private Route  table for NAT Gateway1
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      Tags: 
+        - Key: Name
+          Value: !Sub Priv-Rout-Tab1 for ${EnvironmentName}
+  PrivateRouteTable2: 
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref WebAppVPC
+      Tags: 
+        - Key: !Ref WebAppVPC
+          Value: !Sub priv-Rout-Tab2 for ${EnvironmentName}
+  DefaultPrivateRoute1: #Creating default Routes to  private RTs
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+  PrivateSubnet1RouteTableAssociation: #Private route table association
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+  PrivateSubnet2ROuteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+Outputs: 
+  WebAppVPCOutput: 
+    Description: A reference to the WebAPPVPC
+    Value: !Ref WebAppVPC
+    Export: 
+      Name: !Sub ${EnvironmentName}-WebAppVPCId
+  VpcPublicRouteTable: 
+    Description: Public Route Table for public subnets in WebAppVPC
+    Value: !Ref PublicRouteTable
+    Export: 
+      Name: !Sub ${EnvironmentName}-PUB-RT
+  VpcPrivateRouteTable1: 
+    Description: Private Route Table 1 for private subnet 1 in WebAppVPC
+    Value: !Ref PrivateRouteTable1
+    Export: 
+      Name: !Sub ${EnvironmentName}-PRIV-RT-1
+  VpcPrivateRouteTable2: 
+    Description: Private Route Table 2 for private Subnet 2 in WebAppVPC
+    Value: !Ref PrivateRouteTable2
+    Export: 
+      Name: !Sub ${EnvironmentName}-PRIV-RT-2
+  
+  PublicSubnets: #These are for AutoScalingGroup
+    Description: A list of Public Subnets
+    Value: !Join [",", [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+    Export: 
+      Name: !Sub ${EnvironmentName}-Public-Subnets
+  PrivateSubnets: #These are for AutoScalingGroup VPCZoneIdentifier
+    Description: A list of Private Subnets
+    Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export: 
+      Name: !Sub ${EnvironmentName}-Private-Subnets
+  
+  PublicSubnet1Out: 
+    Description: A reference to the Public Subnet 1 in WebAppVPC
+    Value: !Ref PublicSubnet1
+    Export: 
+      Name: !Sub ${EnvironmentName}-PUB-SUB-1
+  PublicSubnet2Out: 
+    Description: A reference to the Public Subnet 2 in WebAppVpc
+    Value: !Ref PublicSubnet2
+    Export: 
+      Name: !Sub ${EnvironmentName}-PUB-SUB-2
+  PrivateSubnet1Out:
+    Description: A reference to the Private Subnet 1 in WebAppVPC
+    Value: !Ref PrivateSubnet1
+    Export: 
+      Name: !Sub ${EnvironmentName}-PRIV-SUB-1
+  PrivateSubnet2Out: 
+    Description: A reference to the Private Subnet 2 in WebAppVPC
+    Value: !Ref PrivateSubnet2
+    Export: 
+      Name: !Sub ${EnvironmentName}-PRIV-SUB-2
