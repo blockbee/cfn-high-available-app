@@ -134,7 +134,7 @@ Resources:
           apt-get install apache2 -y
           cd /var/www/html
           echo "Welcome visitor" > index.html #just in case S3 did not work
-          aws s3 cp s3://johndoe-portf-test/portfolio.zip
+          aws s3 cp s3://johndoe-by-shiv/JohnDoe.zip
           unzip -o portfolio.zips
           systemctl start apache2.service
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ubuntu]
