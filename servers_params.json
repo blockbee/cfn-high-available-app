@@ -5,6 +5,6 @@
     },
     {
     "ParameterKey": "KeyName",
-    "ParameterValue": "mumbai.pem"
+    "ParameterValue": "us-east-1"
     }
 ]

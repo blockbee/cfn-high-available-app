@@ -39,6 +39,14 @@ Mappings:
       EC2: t3.large
 
 Resources: 
+  BastionHost: 
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ubuntu]
+      Tags: 
+        - Key: Name
+          Value: !Sub BastionHost-${EnvironmentName}
   LoadBalancerSecurityGroup: #Security Groups
     Type: AWS::EC2::SecurityGroup
     Properties: 
@@ -132,7 +140,7 @@ Resources:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ubuntu]
       InstanceType: !FindInMap [InstanceSize, !Ref EnvironmentSize, EC2 ]
       IamInstanceProfile: !Ref EC2ReadOnlyS3InstanceProfile
-      AssociatePublicIpAddress: true
+      #AssociatePublicIpAddress: true
       SecurityGroups: 
         - !Ref WebServerSecurityGroup
       BlockDeviceMappings: 
@@ -198,3 +206,9 @@ Outputs:
     Value: !GetAtt WebAppLoadBalancer.DNSName
     Export: 
       Name: !Sub ${EnvironmentName}-LBDNS
+  BastionIp: 
+    Description: Ip address of Bastion Host
+    Value: !GetAtt BastionHost.PublicIp
+    Export: 
+      Name: !Sub ${EnvironmentName}-BastionHost-IP
+
