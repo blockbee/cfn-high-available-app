@@ -1,0 +1,10 @@
+[
+    {
+    "ParameterKey": "EnvironmentName",
+    "ParameterValue": "WebApp"
+    },
+    {
+    "ParameterKey": "KeyName",
+    "ParameterValue": "mumbai.pem"
+    }
+]

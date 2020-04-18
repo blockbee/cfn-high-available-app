@@ -32,14 +32,11 @@ Mappings:
       Amazon: ami-03b5297d565ef30a6
   InstanceSize: #Map(2) Logical name
     SMALL: #Key
-      EC2: t2.micro #NAme: Value
-      DB: db.t2.micro
+      EC2: t3.small #NAme: Value
     MEDIUM: 
-      EC2: t2.small
-      DB: db.t2.small
+      EC2: t3.medium
     LARGE: 
-      EC2: t2.medium
-      DB: db.t2.medium
+      EC2: t3.large
 
 Resources: 
   LoadBalancerSecurityGroup: #Security Groups
@@ -128,6 +125,7 @@ Resources:
           apt-get install unzip awscli -y
           apt-get install apache2 -y
           cd /var/www/html
+          echo "Welcome visitor" > index.html #just in case S3 did not work
           aws s3 cp s3://johndoe-portf-test/portfolio.zip
           unzip -o portfolio.zips
           systemctl start apache2.service
@@ -135,7 +133,6 @@ Resources:
       InstanceType: !FindInMap [InstanceSize, !Ref EnvironmentSize, EC2 ]
       IamInstanceProfile: !Ref EC2ReadOnlyS3InstanceProfile
       AssociatePublicIpAddress: true
-      KeyName: !Ref KeyName
       SecurityGroups: 
         - !Ref WebServerSecurityGroup
       BlockDeviceMappings: 
@@ -195,20 +192,9 @@ Resources:
       VpcId: 
         Fn::ImportValue: !Sub ${EnvironmentName}-WebAppVPCId
 
-#   S3Portfolio: 
-#     Type: AWS::S3::Bucket
-#     DeletionPolicy: Retain
-#     Properties: 
-#       BucketName: !Sub johndoe-portf-${EnvironmentName}
-
-# Outputs: 
-#   S3Portf: 
-#     Description: Portfolio website files in the bucket S3Portfolio
-#     Value: !Ref S3Portfolio
-#     Export: 
-#       Name: !Sub ${EnvironmentName}-johndoe-portfo
-  # EC2PublicIP: 
-  #   Description: Public Ip Address for EC2
-  #   Value: !GetAtt WebAppAutoScalingGroup.PublicIp
-  #   Export: 
-  #     Name: !Sub ${EnvironmentName}-publicIp
+Outputs: 
+  LoadBalancerDNS: 
+    Description: URL/DNS for Application Load BAlancer
+    Value: !GetAtt WebAppLoadBalancer.DNSName
+    Export: 
+      Name: !Sub ${EnvironmentName}-LBDNS
